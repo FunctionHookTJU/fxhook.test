@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>卫戍协议：盟约 · 服务器连接诊断</title>
+<!--
+  一键诊断：双击本文件用浏览器打开，点「开始检测」即可。
+  不需要安装任何东西，不上传任何数据，所有检测都在你自己的浏览器里完成。
+
+  它会依次测四个游戏入口，用的是和游戏客户端完全相同的通道（WebSocket + ping/pong），
+  所以测出来的延迟数字和游戏里那个「信号」是一回事。
+
+  想改地址：编辑下面 TARGETS 数组即可。
+-->
+<style>
+  :root{
+    --bg:#14181c; --card:#1c2228; --line:#2b3238; --fg:#e6edf3; --dim:#8b979f;
+    --ok:#3ddc97; --warn:#f5b942; --bad:#ff5c5c; --accent:#4aa8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;background:var(--bg);color:var(--fg);
+       font:15px/1.6 "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:18px}
+  button{background:var(--accent);color:#06121f;border:0;border-radius:8px;
+         padding:11px 26px;font-size:15px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:14px 16px;margin:10px 0}
+  .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .name{font-weight:700}
+  .url{color:var(--dim);font-size:12px;font-family:Consolas,monospace;word-break:break-all}
+  .badge{margin-left:auto;font-weight:700;white-space:nowrap}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)} .dim{color:var(--dim)}
+  .rtt{font-size:20px;font-weight:700;font-family:Consolas,monospace}
+  .why{font-size:13px;color:var(--dim);margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+  .why b{color:var(--fg);font-weight:600}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--dim);
+        border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  #rec{margin-top:18px;padding:16px;border-radius:10px;border:1px solid var(--ok);
+       background:rgba(61,220,151,.08);display:none}
+  #rec .big{font-size:17px;font-weight:700;color:var(--ok);word-break:break-all}
+  details{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+  summary{cursor:pointer;font-weight:700}
+  details ul{padding-left:20px} details li{margin:7px 0;font-size:13.5px;color:#cfd8de}
+  code{background:#0e1216;padding:1px 6px;border-radius:4px;font-family:Consolas,monospace;font-size:12.5px}
+  .env{font-size:12.5px;color:var(--dim);margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>卫戍协议：盟约 · 服务器连接诊断</h1>
+  <div class="sub">
+    点下面的按钮，它会用<b>和游戏客户端完全相同的通道</b>逐个测试游戏入口，
+    告诉你哪个能用、延迟多少、不能用的为什么不行。数据不上传，全部在你本机完成。
+  </div>
+
+  <button id="go">开始检测</button>
+
+  <div id="list"></div>
+  <div id="rec"></div>
+
+  <details>
+    <summary>检测不出来 / 结果和预期不一样？点这里看原因和解决办法</summary>
+    <ul>
+      <li><b>某个地址显示「域名解析失败」</b>：说明这个域名在你的网络里查不到。最常见的原因是
+          <b>你的 DNS 缓存了旧的记录</b>（域名刚配好不久）。解决办法：换一个 DNS（如
+          <code>223.5.5.5</code> / <code>119.29.29.29</code>），或者等 30 分钟再试。</li>
+      <li><b>显示「连接超时」</b>：域名能解析，但连不上。多半是你所在的网络（校园网、公司网、
+          部分运营商）屏蔽了这条线路。换手机流量热点再测一次就能确认。</li>
+      <li><b>带 <code>[2403:...]</code> 或 <code>v6.</code> 的地址失败</b>：这两个是
+          <b>IPv6 直连</b>，需要你的网络本身支持公网 IPv6。手机 4G/5G 通常有；
+          不少家庭宽带和老旧路由器没有。用 <code>test-ipv6.com</code> 可以查。</li>
+      <li><b>http:// 的地址打不开但 https:// 能开</b>：有些浏览器/安全软件会强制 https。
+          这种情况用 https 那条（延迟高一些但稳）。</li>
+      <li><b>延迟忽高忽低、偶尔断线</b>：如果所有地址都这样，问题在你本地网络；如果只有某一条，
+          说明是那条线路拥堵，换另一条即可。</li>
+      <li><b>页面本身打不开或按钮没反应</b>：请用 Chrome / Edge 打开这个文件，别用 IE。</li>
+    </ul>
+  </details>
+
+  <div class="env" id="env"></div>
+</div>
+
+<script>
+'use strict';
+
+// ── 要检测的游戏入口 ────────────────────────────────────────────────────────
+// url     : 给人用的访问地址
+// host    : 用来查 DNS 的域名（null = 直接 IP，不需要查）
+// ws      : 对应的 WebSocket 地址（游戏真正用的通道）
+// needsV6 : 该地址依赖公网 IPv6
+const TARGETS = [
+  {
+    name: '直连 IPv6（通常最快）',
+    url: 'http://v6.fxhook.cn:3000/',
+    host: 'v6.fxhook.cn', dnsType: 'AAAA',
+    ws: 'ws://v6.fxhook.cn:3000/ws',
+    needsV6: true,
+    note: '域名解析到你服务器的公网 IPv6，不经任何中转。',
+  },
+  {
+    name: '直连 IPv6（地址形式，v6.fxhook.cn 的备用）',
+    url: 'http://[2403:ac00:a201:1118:7c34:9620:73:ede4]:3000/',
+    host: null,
+    ws: 'ws://[2403:ac00:a201:1118:7c34:9620:73:ede4]:3000/ws',
+    needsV6: true,
+    note: '直接用 IPv6 地址连接。地址可能会变，长期请用上面的域名。',
+  },
+  {
+    name: 'SakuraFrp 国内加速',
+    url: 'http://frp.fxhook.cn/',
+    host: 'frp.fxhook.cn', dnsType: 'A',
+    ws: 'ws://frp.fxhook.cn/ws',
+    needsV6: false,
+    note: '经国内中转节点，纯 IPv4 网络也能用。',
+  },
+  {
+    name: 'Cloudflare 隧道（备用线路）',
+    url: 'https://fxhook.cn/',
+    host: 'fxhook.cn', dnsType: 'A',
+    ws: 'wss://fxhook.cn/ws',
+    needsV6: false,
+    note: '海外线路，延迟偏高，作为兜底。',
+  },
+];
+
+const DNS_TIMEOUT = 5000;   // 查 DNS 的超时
+const WS_TIMEOUT  = 7000;   // WebSocket 尝试的超时
+const HTTP_TIMEOUT = 5000;  // HTTP 探测的超时
+
+const $ = (s) => document.querySelector(s);
+const list = $('#list');
+
+// ── 小工具 ─────────────────────────────────────────────────────────────────
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+  ]);
+}
+
+/** 用公共 DNS-over-HTTPS 查域名，判断「这个域名在公网上到底有没有记录」。
+ *  这一步和浏览器自己的解析是两条独立路径，所以能区分出
+ *  「域名没配好」和「你本机解析不了」。 */
+async function resolvePublic(host, type) {
+  if (!host) return { skipped: true };
+  const url = `https://dns.alidns.com/resolve?name=${encodeURIComponent(host)}&type=${type}`;
+  const t0 = performance.now();
+  try {
+    const res = await withTimeout(fetch(url, { cache: 'no-store' }), DNS_TIMEOUT);
+    const j = await res.json();
+    const answers = (j.Answer || []).map((a) => `${a.type === 5 ? 'CNAME ' : ''}${a.data}`);
+    return { ok: answers.length > 0, answers, ms: Math.round(performance.now() - t0) };
+  } catch (e) {
+    return { ok: false, failed: true, answers: [], ms: Math.round(performance.now() - t0), err: String(e.message) };
+  }
+}
+
+/** HTTP 层能不能通（只判断可达性；判定以 WebSocket 为准）。 */
+async function probeHttp(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT);
+  const t0 = performance.now();
+  try {
+    await fetch(url + 'healthz', { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
+    return { ok: true, ms: Math.round(performance.now() - t0) };
+  } catch (e) {
+    return { ok: false, ms: Math.round(performance.now() - t0), timeout: e.name === 'AbortError' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 游戏真正用的通道：开 WebSocket，发 ping，收 pong，量 RTT。
+ *  服务端对 ping 是免握手就应答的，所以这里量到的就是游戏中那个「信号」。 */
+function probeWs(wsUrl) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const rtts = [];
+    let ws = null, done = false, opened = false;
+
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      try { if (ws && ws.readyState <= 1) ws.close(); } catch (e) {}
+      resolve(Object.assign({ elapsed: Math.round(performance.now() - t0) }, r));
+    };
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      finish({ ok: false, kind: 'construct', reason: '浏览器拒绝发起连接：' + e.message });
+      return;
+    }
+
+    const askPing = () => {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'ping', c: Date.now() }));
+    };
+
+    ws.onopen = () => { opened = true; askPing(); };
+
+    ws.onmessage = (ev) => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'pong' && typeof m.c === 'number') {
+        const rtt = Date.now() - m.c;
+        if (rtt >= 0 && rtt < 60000) rtts.push(rtt);
+        if (rtts.length >= 3) {
+          const avg = Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length);
+          finish({ ok: true, rtt: avg, samples: rtts.length, kind: 'pong' });
+        } else {
+          setTimeout(askPing, 150);
+        }
+      }
+    };
+
+    ws.onerror = () => finish({ ok: false, kind: opened ? 'error-after-open' : 'error', reason: '连接失败' });
+
+    ws.onclose = (ev) => {
+      finish({ ok: false, kind: opened ? 'closed-after-open' : 'closed',
+               reason: `连接被关闭（代码 ${ev.code}${ev.reason ? '：' + ev.reason : ''}）` });
+    };
+
+    setTimeout(() => finish({ ok: false, kind: 'timeout', reason: `等待 ${WS_TIMEOUT / 1000} 秒无响应` }), WS_TIMEOUT);
+  });
+}
+
+// ── 把结果翻译成人话 ───────────────────────────────────────────────────────
+function explain(t, dns, http, ws) {
+  if (ws.ok) {
+    return { level: 'ok', text: '' };
+  }
+  // 域名在公网上根本没有记录 → 服务端的问题
+  if (dns && dns.ok === false && !dns.skipped) {
+    if (dns.failed) {
+      return { level: 'bad', text: `<b>无法确认域名状态</b>：连 DNS 查询服务都访问不了（${dns.err || '超时'}）。`
+        + `这说明你当前的网络对外访问受限，请换个网络（例如手机热点）再试。` };
+    }
+    return { level: 'bad', text: `<b>域名没有解析记录</b>：公共 DNS 上查不到 <code>${t.host}</code> 的 ${t.dnsType} 记录，`
+      + `说明服务器那边这个域名还没配好，不是你的问题。` };
+  }
+  // 域名正常但连不上
+  const quick = ws.elapsed < 1500;
+  if (t.needsV6 && quick) {
+    return { level: 'bad', text: `<b>你的网络可能没有公网 IPv6</b>（连接被立即失败）。`
+      + `这个地址需要 IPv6：手机 4G/5G 一般有，部分家庭宽带没有。`
+      + `可以先用下面那个国内的 http 线路。` };
+  }
+  if (quick) {
+    return { level: 'bad', text: `<b>连接被立即拒绝 / 域名解析失败</b>（${ws.elapsed} ms 就失败）。`
+      + `域名在公共 DNS 上是正常的${dns && dns.answers && dns.answers.length ? `（解析到 ${dns.answers.join('、')}）` : ''}，`
+      + `所以多半是<b>你本机的 DNS 缓存了旧记录</b>：换 DNS（<code>223.5.5.5</code>）或等 30 分钟再试。` };
+  }
+  if (ws.kind === 'timeout' || (http && http.timeout)) {
+    return { level: 'bad', text: `<b>连接超时</b>：域名正常，但数据包发不通。`
+      + `多半是你所在网络（校园网 / 公司网 / 部分运营商）屏蔽了这条线路。`
+      + `<b>用手机流量热点再测一次</b>就能确认。` };
+  }
+  if (ws.kind === 'closed-after-open' || ws.kind === 'error-after-open') {
+    return { level: 'bad', text: `<b>连上了但马上被断开</b>：中转服务不稳定或后端离线。`
+      + `稍后重试，或改用其它线路。` };
+  }
+  return { level: 'bad', text: `<b>无法建立游戏通道</b>：${ws.reason || '未知原因'}。`
+    + `如果 HTTP 探测是通的、只有 WebSocket 失败，可能是网络设备拦了 WebSocket 升级，`
+    + `换手机热点验证一下。` };
+}
+
+function tierOf(rtt) {
+  if (rtt < 60) return { cls: 'ok', label: '很好' };
+  if (rtt < 200) return { cls: 'warn', label: '一般' };
+  return { cls: 'bad', label: '偏高' };
+}
+
+// ── 渲染 ───────────────────────────────────────────────────────────────────
+function renderShell() {
+  list.innerHTML = TARGETS.map((t, i) => `
+    <div class="card" id="c${i}">
+      <div class="row">
+        <span class="name">${t.name}</span>
+        <span class="badge dim" id="b${i}"><span class="spin"></span> 等待…</span>
+      </div>
+      <div class="url">${t.url}</div>
+      <div class="dim" style="font-size:12.5px;margin-top:4px">${t.note}</div>
+      <div class="why" id="w${i}" style="display:none"></div>
+    </div>`).join('');
+}
+
+async function runOne(t, i) {
+  const badge = document.getElementById('b' + i);
+  const why = document.getElementById('w' + i);
+
+  badge.innerHTML = '<span class="spin"></span> 检测中…';
+  // DNS 与 HTTP 探测并行跑，省时间
+  const [dns, http] = await Promise.all([
+    resolvePublic(t.host, t.dnsType),
+    probeHttp(t.url),
+  ]);
+  const ws = await probeWs(t.ws);
+
+  const verdict = explain(t, dns, http, ws);
+  if (ws.ok) {
+    const tier = tierOf(ws.rtt);
+    badge.className = 'badge ' + tier.cls;
+    badge.textContent = `✅ 可用　${ws.rtt} ms`;
+    why.style.display = '';
+    why.innerHTML = `<span class="rtt ${tier.cls}">${ws.rtt} ms</span> `
+      + `<span class="${tier.cls}">（${tier.label}，游戏内信号按 &lt;60 / &lt;200 ms 分档）</span>`
+      + `　· 游戏通道已确认可用（${ws.samples} 次 ping/pong 平均）`;
+    return { ok: true, rtt: ws.rtt, url: t.url, name: t.name };
+  }
+
+  badge.className = 'badge bad';
+  badge.textContent = '❌ 不可用';
+  why.style.display = '';
+  why.innerHTML = verdict.text
+    + `<br><span class="dim">技术细节：DNS ${dns.skipped ? '（跳过）' : (dns.ok ? '正常 ' + dns.answers.join('、') : '无记录')}`
+    + `　|　HTTP ${http.ok ? '可达 ' + http.ms + 'ms' : (http.timeout ? '超时' : '失败')}`
+    + `　|　WebSocket ${ws.reason || '失败'}（${ws.elapsed}ms）</span>`;
+  return { ok: false, url: t.url, name: t.name };
+}
+
+async function run() {
+  $('#go').disabled = true;
+  $('#rec').style.display = 'none';
+  renderShell();
+
+  const results = [];
+  // 四个入口并行检测，每张卡片各自更新，整体耗时约等于最慢的一条
+  await Promise.all(TARGETS.map(async (t, i) => {
+    try {
+      results[i] = await runOne(t, i);
+    } catch (e) {
+      const b = document.getElementById('b' + i);
+      b.className = 'badge bad';
+      b.textContent = '❌ 检测异常';
+      const w = document.getElementById('w' + i);
+      w.style.display = '';
+      w.innerHTML = '<b>检测过程出错</b>：' + String(e && e.message || e)
+        + '<br><span class="dim">请用 Chrome / Edge 打开本文件重试。</span>';
+      results[i] = { ok: false, url: t.url, name: t.name };
+    }
+  }));
+
+  // 环境探测：本机能否走 IPv6
+  const v6 = results[0].ok || results[1].ok;
+  const v4 = results[2].ok || results[3].ok;
+  $('#env').innerHTML = `本机网络：IPv6 ${v6 ? '<span class="ok">可用</span>' : '<span class="bad">不可用</span>'}`
+    + `　·　IPv4/中转 ${v4 ? '<span class="ok">可用</span>' : '<span class="bad">不可用</span>'}`
+    + `　·　浏览器 ${navigator.userAgent.includes('Chrome') ? 'Chrome/Edge' : navigator.userAgent.slice(0, 40)}`;
+
+  const working = results.filter((r) => r.ok).sort((a, b) => a.rtt - b.rtt);
+  const rec = $('#rec');
+  if (working.length) {
+    const best = working[0];
+    rec.innerHTML = `<div>检测完成 —— 推荐使用这一条：</div>
+      <div class="big">${best.url}</div>
+      <div style="margin-top:6px">${best.name}，延迟 <b>${best.rtt} ms</b>。
+      ${working.length > 1 ? '备用：' + working.slice(1).map((w) => `${w.url}（${w.rtt}ms）`).join('　') : '其余线路当前不可用。'}</div>`;
+  } else {
+    rec.style.borderColor = 'var(--bad)';
+    rec.style.background = 'rgba(255,92,92,.08)';
+    rec.innerHTML = `<div class="big bad">所有线路都连不上</div>
+      <div style="margin-top:6px">先换手机流量热点再测一次。如果热点下能用，说明是你本地网络的问题；
+      如果热点下也不行，把这张截图发给服主。</div>`;
+  }
+  rec.style.display = 'block';
+  $('#go').disabled = false;
+  $('#go').textContent = '重新检测';
+}
+
+$('#go').addEventListener('click', run);
+run();   // 打开即自动开始
+</script>
+</body>
+</html>
