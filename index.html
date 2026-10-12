@@ -8,7 +8,7 @@
   一键诊断：双击本文件用浏览器打开，点「开始检测」即可。
   不需要安装任何东西，不上传任何数据，所有检测都在你自己的浏览器里完成。
 
-  它会依次测四个游戏入口，用的是和游戏客户端完全相同的通道（WebSocket + ping/pong），
+  它会依次测三个游戏入口，用的是和游戏客户端完全相同的通道（WebSocket + ping/pong），
   所以测出来的延迟数字和游戏里那个「信号」是一回事。
 
   想改地址：编辑下面 TARGETS 数组即可。
@@ -71,9 +71,9 @@
           <code>223.5.5.5</code> / <code>119.29.29.29</code>），或者等 30 分钟再试。</li>
       <li><b>显示「连接超时」</b>：域名能解析，但连不上。多半是你所在的网络（校园网、公司网、
           部分运营商）屏蔽了这条线路。换手机流量热点再测一次就能确认。</li>
-      <li><b>带 <code>[2403:...]</code> 或 <code>v6.</code> 的地址失败</b>：这两个是
-          <b>IPv6 直连</b>，需要你的网络本身支持公网 IPv6。手机 4G/5G 通常有；
-          不少家庭宽带和老旧路由器没有。用 <code>test-ipv6.com</code> 可以查。</li>
+      <li><b>带 <code>v6.</code> 的地址失败</b>：这是 <b>IPv6 直连</b>，需要你的网络本身
+          支持公网 IPv6。手机 4G/5G 通常有；不少家庭宽带和老旧路由器没有。
+          用 <code>test-ipv6.com</code> 可以查。</li>
       <li><b>http:// 的地址打不开但 https:// 能开</b>：有些浏览器/安全软件会强制 https。
           这种情况用 https 那条（延迟高一些但稳）。</li>
       <li><b>延迟忽高忽低、偶尔断线</b>：如果所有地址都这样，问题在你本地网络；如果只有某一条，
@@ -93,6 +93,10 @@
 // host    : 用来查 DNS 的域名（null = 直接 IP，不需要查）
 // ws      : 对应的 WebSocket 地址（游戏真正用的通道）
 // needsV6 : 该地址依赖公网 IPv6
+//
+// 这里刻意不写死 IPv6 地址：服务器的 IPv6 由路由器 RA 分配，会随前缀变化，
+// 而且网卡上可能同时挂着已经失效的旧前缀地址，写死的地址很快就会连不上。
+// 统一走 v6.fxhook.cn —— 服务端有 DDNS 自动跟随变化的地址。
 const TARGETS = [
   {
     name: '直连 IPv6（通常最快）',
@@ -100,15 +104,7 @@ const TARGETS = [
     host: 'v6.fxhook.cn', dnsType: 'AAAA',
     ws: 'ws://v6.fxhook.cn:3000/ws',
     needsV6: true,
-    note: '域名解析到你服务器的公网 IPv6，不经任何中转。',
-  },
-  {
-    name: '直连 IPv6（地址形式，v6.fxhook.cn 的备用）',
-    url: 'http://[2403:ac00:a201:1118:7c34:9620:73:ede4]:3000/',
-    host: null,
-    ws: 'ws://[2403:ac00:a201:1118:7c34:9620:73:ede4]:3000/ws',
-    needsV6: true,
-    note: '直接用 IPv6 地址连接。地址可能会变，长期请用上面的域名。',
+    note: '域名解析到你服务器的公网 IPv6，不经任何中转。服务器换地址时域名会自动跟随。',
   },
   {
     name: 'SakuraFrp 国内加速',
@@ -329,7 +325,7 @@ async function run() {
   renderShell();
 
   const results = [];
-  // 四个入口并行检测，每张卡片各自更新，整体耗时约等于最慢的一条
+  // 三个入口并行检测，每张卡片各自更新，整体耗时约等于最慢的一条
   await Promise.all(TARGETS.map(async (t, i) => {
     try {
       results[i] = await runOne(t, i);
@@ -346,8 +342,8 @@ async function run() {
   }));
 
   // 环境探测：本机能否走 IPv6
-  const v6 = results[0].ok || results[1].ok;
-  const v4 = results[2].ok || results[3].ok;
+  const v6 = results[0].ok;
+  const v4 = results[1].ok || results[2].ok;
   $('#env').innerHTML = `本机网络：IPv6 ${v6 ? '<span class="ok">可用</span>' : '<span class="bad">不可用</span>'}`
     + `　·　IPv4/中转 ${v4 ? '<span class="ok">可用</span>' : '<span class="bad">不可用</span>'}`
     + `　·　浏览器 ${navigator.userAgent.includes('Chrome') ? 'Chrome/Edge' : navigator.userAgent.slice(0, 40)}`;
